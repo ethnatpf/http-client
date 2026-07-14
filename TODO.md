@@ -1,0 +1,6 @@
+- Write tests
+- Parse the response (instead of just printing it)
+- Implement multiple methods
+- Handle DNS
+- Handle redirects
+- TLS/HTTPS (this one is harder, keep it for the end)
