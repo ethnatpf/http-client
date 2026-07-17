@@ -1,8 +1,39 @@
 const std = @import("std");
+const dns = @import("dns.zig");
+
+pub const FetchError = error{ UnsupportedTarget, InvalidTarget };
 
 /// Make an HTTP request to an endpoint, and return the stream. Don't forget to close the stream.
-///
-pub fn fetch(io: std.Io) !std.Io.net.Stream {
+pub fn fetch(io: std.Io, target: []const u8) !std.Io.net.Stream {
+    var parsedIp = std.Io.net.IpAddress.parseLiteral(target) catch null;
+
+    // If null, assume it's an url
+    if (parsedIp == null) {
+        // Resolve the dns and reassigned parsedIp
+        const parsedUri = try std.Uri.parse(target);
+
+        if (parsedUri.host == null) {
+            std.debug.print("Unable to extract the host out of this target.", .{});
+            return FetchError.InvalidTarget;
+        }
+        const host = parsedUri.host.?.percent_encoded;
+
+        std.debug.print("Host: {s}\n", .{host});
+
+        std.debug.print("Parsing the DNS...\n", .{});
+        parsedIp = dns.parseDNS(host);
+    }
+
+    if (parsedIp != null and std.meta.activeTag(parsedIp.?) == .ip6) {
+        std.debug.print("ipv6 is not supported\n", .{});
+        return FetchError.UnsupportedTarget;
+    }
+
+    if (parsedIp == null) {
+        // We were not able to parse the target.
+        return FetchError.InvalidTarget;
+    }
+
     const address = try std.Io.net.IpAddress.parse("127.0.0.1", 8000);
 
     const stream = try std.Io.net.IpAddress.connect(&address, io, .{ .protocol = .tcp, .mode = .stream });
