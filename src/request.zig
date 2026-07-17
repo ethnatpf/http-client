@@ -20,8 +20,8 @@ pub fn fetch(io: std.Io, target: []const u8) !std.Io.net.Stream {
 
         std.debug.print("Host: {s}\n", .{host});
 
-        std.debug.print("Parsing the DNS...\n", .{});
-        parsedIp = dns.parseDNS(host);
+        std.debug.print("Resolving the host...\n", .{});
+        parsedIp = dns.resolveHost(host);
     }
 
     if (parsedIp != null and std.meta.activeTag(parsedIp.?) == .ip6) {
