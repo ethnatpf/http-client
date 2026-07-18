@@ -3,7 +3,7 @@ const Response = @import("src/response.zig");
 const Request = @import("src/request.zig");
 
 pub fn main(init: std.process.Init) !void {
-    const stream = try Request.fetch(init.io, "https://portfolio.ethnatpf.com/fr");
+    const stream = try Request.fetch(init.io, init.gpa, "https://portfolio.ethnatpf.com/fr");
     defer stream.close(init.io);
 
     // Read the response

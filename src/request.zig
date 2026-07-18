@@ -4,7 +4,7 @@ const dns = @import("dns.zig");
 pub const FetchError = error{ UnsupportedTarget, InvalidTarget };
 
 /// Make an HTTP request to an endpoint, and return the stream. Don't forget to close the stream.
-pub fn fetch(io: std.Io, target: []const u8) !std.Io.net.Stream {
+pub fn fetch(io: std.Io, allocator: std.mem.Allocator, target: []const u8) !std.Io.net.Stream {
     var parsedIp = std.Io.net.IpAddress.parseLiteral(target) catch null;
 
     // If null, assume it's an url
@@ -21,7 +21,7 @@ pub fn fetch(io: std.Io, target: []const u8) !std.Io.net.Stream {
         std.debug.print("Host: {s}\n", .{host});
 
         std.debug.print("Resolving the host...\n", .{});
-        parsedIp = dns.resolveHost(host);
+        parsedIp = try dns.resolveHost(io, allocator, host);
     }
 
     if (parsedIp != null and std.meta.activeTag(parsedIp.?) == .ip6) {

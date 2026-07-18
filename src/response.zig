@@ -3,6 +3,7 @@ const std = @import("std");
 const ParseError = error{EmptyResponse};
 
 /// Parse an HTTP response from a reader.
+/// TODO: Revisit this function, it could be way more optimized. Also add a comment as of why we are reading byte by byte
 pub fn parse(reader: *std.Io.Reader, allocator: std.mem.Allocator) ![]u8 {
     var response: ?[]u8 = null;
 
