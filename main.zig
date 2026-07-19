@@ -15,6 +15,6 @@ pub fn main(init: std.process.Init) !void {
 
     const response = try Response.parse(reader, init.gpa);
 
-    std.debug.print("Response: {s}", .{response});
+    //std.debug.print("Response: {s}", .{response});
     defer init.gpa.free(response);
 }
