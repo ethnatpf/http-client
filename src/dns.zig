@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const DNSError = error{EmptyResponse};
+const DNSError = error{ EmptyResponse, InvalidHeaders };
 
 // A packed struct is in least significant bit first order, so we must "reverse" the fields.
 pub const DNSHeadersFlags = packed struct {
@@ -46,6 +46,14 @@ pub const DNSHeaders = struct {
         }
 
         return header_bytes;
+    }
+    pub fn parseHeaders(headers: [6]u16) !DNSHeaders {
+        // We need at least 12 bytes for the headers
+        if (headers.len < 6) {
+            return DNSError.InvalidHeaders;
+        }
+
+        return .{ .id = headers[0], .flags = @bitCast(@byteSwap(@as(u16, @bitCast(headers[1])))), .question_count = headers[2], .answer_count = headers[3], .authority_rr_count = headers[4], .additional_rr_count = headers[5] };
     }
 };
 
@@ -103,13 +111,24 @@ fn buildDNSQuery(allocator: std.mem.Allocator, host: []const u8) ![]u8 {
 }
 
 /// Parse a DNS response and returns the IP if its a success or an error if not.
-fn parseDNSResponse(response: []u8) ![]u8 {
-    if (response.len) {
+fn parseDNSResponse(response: []u8) !void {
+    if (response.len == 0) {
         return DNSError.EmptyResponse;
     }
 
+    var u16_headers: [6]u16 = undefined;
+    var i: usize = 0;
+    while (i < 6) : (i += 1) {
+        u16_headers[i] = std.mem.readInt(u16, response[i * 2 .. (i * 2) + 2][0..2], .big);
+    }
+
+    const headers = DNSHeaders.parseHeaders(u16_headers);
+
+    std.debug.print("Parsed headers: {any}\n", .{headers});
+
     // TODO: Verify if its a response inside the flags
     // TODO: Try to parse the whole thing and return a struct instead of just extracting the IP
+
 }
 
 pub fn resolveHost(io: std.Io, allocator: std.mem.Allocator, host: []const u8) !?std.Io.net.IpAddress {
@@ -141,7 +160,7 @@ pub fn resolveHost(io: std.Io, allocator: std.mem.Allocator, host: []const u8) !
     std.debug.print("Read the DNS reader buffer\n", .{});
     // TODO: Implement timeout/retry if we don't get any response.
     _ = try reader.readVec(&response_data);
-    std.debug.print("DNS response: {s}\n", .{response_data[0]});
+    try parseDNSResponse(response_data[0]);
 
     return std.Io.net.IpAddress.parseLiteral("127.0.0.1") catch null;
 }
