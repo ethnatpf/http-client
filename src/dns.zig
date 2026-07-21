@@ -1,8 +1,9 @@
 const std = @import("std");
 
-const DNSError = error{ EmptyResponse, InvalidHeaders };
+const DNSError = error{ EmptyResponse, InvalidHeaders, FormatError, ServerError, NonExistentDomain };
 
 // A packed struct is in least significant bit first order, so we must "reverse" the fields.
+// Note for myself: This has nothing to do with endianness
 pub const DNSHeadersFlags = packed struct {
     // Response code
     rcode: u4 = 0,
@@ -47,13 +48,14 @@ pub const DNSHeaders = struct {
 
         return header_bytes;
     }
+
     pub fn parseHeaders(headers: [6]u16) !DNSHeaders {
-        // We need at least 12 bytes for the headers
+        // We need at least 6 bytes for the headers
         if (headers.len < 6) {
             return DNSError.InvalidHeaders;
         }
 
-        return .{ .id = headers[0], .flags = @bitCast(@byteSwap(@as(u16, @bitCast(headers[1])))), .question_count = headers[2], .answer_count = headers[3], .authority_rr_count = headers[4], .additional_rr_count = headers[5] };
+        return .{ .id = headers[0], .flags = @bitCast(headers[1]), .question_count = headers[2], .answer_count = headers[3], .authority_rr_count = headers[4], .additional_rr_count = headers[5] };
     }
 };
 
@@ -111,6 +113,7 @@ fn buildDNSQuery(allocator: std.mem.Allocator, host: []const u8) ![]u8 {
 }
 
 /// Parse a DNS response and returns the IP if its a success or an error if not.
+/// Question length is in bytes
 fn parseDNSResponse(response: []u8) !void {
     if (response.len == 0) {
         return DNSError.EmptyResponse;
@@ -122,13 +125,27 @@ fn parseDNSResponse(response: []u8) !void {
         u16_headers[i] = std.mem.readInt(u16, response[i * 2 .. (i * 2) + 2][0..2], .big);
     }
 
-    const headers = DNSHeaders.parseHeaders(u16_headers);
+    const headers = try DNSHeaders.parseHeaders(u16_headers);
+
+    // Handle errors returned by the DNS server
+    if (headers.flags.rcode != 0) {
+        //std.debug.print("rcode: {any}\n", .{headers.flags.rcode});
+        //std.debug.print("headers: {any}\n", .{headers});
+        switch (headers.flags.rcode) {
+            1 => return DNSError.FormatError,
+            2 => return DNSError.ServerError,
+            3 => return DNSError.NonExistentDomain,
+            else => unreachable,
+        }
+    }
 
     std.debug.print("Parsed headers: {any}\n", .{headers});
+    // Parse and skip the questions - always start at index 12 (after the headers)
+    // The question section is structured like this: 1 byte for the label length, then the label. Repeat for all the labels. A question ends with 0.
+    const question_sentinel_idx = std.mem.find(u8, response[12..], "0");
+    std.debug.print("Sentinel id: {?any}", .{question_sentinel_idx});
 
-    // TODO: Verify if its a response inside the flags
-    // TODO: Try to parse the whole thing and return a struct instead of just extracting the IP
-
+    // TODO: Parse the answer
 }
 
 pub fn resolveHost(io: std.Io, allocator: std.mem.Allocator, host: []const u8) !?std.Io.net.IpAddress {
