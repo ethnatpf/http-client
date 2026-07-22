@@ -1,6 +1,7 @@
 const std = @import("std");
+const utils = @import("utils.zig");
 
-const DNSError = error{ EmptyResponse, InvalidHeaders, FormatError, ServerError, NonExistentDomain };
+const DNSError = error{ EmptyResponse, InvalidHeaders, FormatError, ServerError, NonExistentDomain, UnsupportedAnswerType };
 
 // A packed struct is in least significant bit first order, so we must "reverse" the fields.
 // Note for myself: This has nothing to do with endianness
@@ -112,9 +113,31 @@ fn buildDNSQuery(allocator: std.mem.Allocator, host: []const u8) ![]u8 {
     return try std.mem.concat(allocator, u8, &.{ &header_bytes, request_question });
 }
 
+/// Parse the labels section of a DNS payload
+/// Returns the last index of the labels (sentinel index or compression pointer last index)
+fn getLabelsEndIndex(payload: []u8, start_index: usize) usize {
+    var cursor: usize = start_index;
+
+    // Find the end of the questions section
+    // A label can be compressed with a compression pointer. A compression pointer always has 11 as the most significant bytes, and it spans on 2 bytes.
+    if (payload[start_index] == 0xc0) {
+        cursor += 1;
+        // A compression pointer indicates the end of the labels section. We don't need to follow it.
+    } else {
+        cursor = std.mem.findScalarPos(u8, payload, start_index, 0).?;
+    }
+
+    return cursor;
+}
+
+const AnswerType = enum { A, NS, CNAME, MX, TXT, AAAA };
+
+const DNSResponse = struct { address: []u8, type: AnswerType, ttl: u32 };
+
 /// Parse a DNS response and returns the IP if its a success or an error if not.
 /// Question length is in bytes
-fn parseDNSResponse(response: []u8) !void {
+/// Returns a DNSResponse - the address has allocated memory and must be unallocated
+fn parseDNSResponse(allocator: std.mem.Allocator, response: []u8) !DNSResponse {
     if (response.len == 0) {
         return DNSError.EmptyResponse;
     }
@@ -129,8 +152,6 @@ fn parseDNSResponse(response: []u8) !void {
 
     // Handle errors returned by the DNS server
     if (headers.flags.rcode != 0) {
-        //std.debug.print("rcode: {any}\n", .{headers.flags.rcode});
-        //std.debug.print("headers: {any}\n", .{headers});
         switch (headers.flags.rcode) {
             1 => return DNSError.FormatError,
             2 => return DNSError.ServerError,
@@ -139,13 +160,72 @@ fn parseDNSResponse(response: []u8) !void {
         }
     }
 
-    std.debug.print("Parsed headers: {any}\n", .{headers});
-    // Parse and skip the questions - always start at index 12 (after the headers)
-    // The question section is structured like this: 1 byte for the label length, then the label. Repeat for all the labels. A question ends with 0.
-    const question_sentinel_idx = std.mem.find(u8, response[12..], "0");
-    std.debug.print("Sentinel id: {?any}", .{question_sentinel_idx});
+    // Assume only one question and answer as we only sent one.
+    if (headers.question_count != 1 or headers.answer_count != 1) {
+        unreachable;
+    }
 
-    // TODO: Parse the answer
+    var cursor = getLabelsEndIndex(response, 12);
+    // Add the question type and class bytes (2 each) - result is the index of the end of the question section
+    cursor += 5;
+
+    // Move the cursor forward to the end of the answer labels section
+    cursor = getLabelsEndIndex(response, cursor);
+
+    const answer_type: AnswerType = switch (std.mem.readInt(u16, response[cursor + 1 .. cursor + 3][0..2], .big)) {
+        1 => AnswerType.A,
+        2 => AnswerType.NS,
+        5 => AnswerType.CNAME,
+        15 => AnswerType.MX,
+        16 => AnswerType.TXT,
+        28 => AnswerType.AAAA,
+        else => unreachable,
+    };
+
+    if (answer_type != AnswerType.A) {
+        std.debug.print("Unsupported DNS answer type {}\n", .{answer_type});
+        return DNSError.UnsupportedAnswerType;
+    }
+
+    // Skip the answer type and class bytes
+    cursor += 5;
+
+    const ttl = std.mem.readInt(u32, response[cursor .. cursor + 4][0..4], .big);
+    cursor += 4;
+
+    const rd_length = std.mem.readInt(u16, response[cursor .. cursor + 2][0..2], .big);
+    cursor += 2;
+
+    const address = response[cursor .. cursor + rd_length];
+
+    const final_address_length = length: {
+        var length: usize = 0;
+        for (address, 0..) |component, idx| {
+            length += utils.decimalLength(component);
+            if (idx < address.len - 1) {
+                // Add 1 for the '.' separator
+                length += 1;
+            }
+        }
+
+        break :length length;
+    };
+
+    const final_address_buf = try allocator.alloc(u8, final_address_length);
+    errdefer allocator.free(final_address_buf);
+
+    var address_buf_idx: usize = 0;
+    for (address) |component| {
+        const component_length = utils.decimalLength(component);
+        _ = try std.fmt.bufPrint(final_address_buf[address_buf_idx .. address_buf_idx + component_length], "{d}", .{component});
+
+        if (address_buf_idx < final_address_length - 1) {
+            final_address_buf[address_buf_idx + component_length] = '.';
+        }
+        address_buf_idx += component_length + 1;
+    }
+
+    return DNSResponse{ .address = final_address_buf, .ttl = ttl, .type = answer_type };
 }
 
 pub fn resolveHost(io: std.Io, allocator: std.mem.Allocator, host: []const u8) !?std.Io.net.IpAddress {
@@ -174,10 +254,10 @@ pub fn resolveHost(io: std.Io, allocator: std.mem.Allocator, host: []const u8) !
     // We need to initialize the slice here
     var response_data: [1][]u8 = .{&response_buffer};
 
-    std.debug.print("Read the DNS reader buffer\n", .{});
     // TODO: Implement timeout/retry if we don't get any response.
     _ = try reader.readVec(&response_data);
-    try parseDNSResponse(response_data[0]);
+    const response = try parseDNSResponse(allocator, response_data[0]);
+    defer allocator.free(response.address);
 
-    return std.Io.net.IpAddress.parseLiteral("127.0.0.1") catch null;
+    return std.Io.net.IpAddress.parseLiteral(response.address) catch null;
 }
