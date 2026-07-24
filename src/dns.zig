@@ -219,7 +219,7 @@ fn parseDNSResponse(allocator: std.mem.Allocator, response: []u8) !DNSResponse {
         const component_length = utils.decimalLength(component);
         _ = try std.fmt.bufPrint(final_address_buf[address_buf_idx .. address_buf_idx + component_length], "{d}", .{component});
 
-        if (address_buf_idx < final_address_length - 1) {
+        if (address_buf_idx + component_length < final_address_length) {
             final_address_buf[address_buf_idx + component_length] = '.';
         }
         address_buf_idx += component_length + 1;

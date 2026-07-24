@@ -3,7 +3,7 @@ const Response = @import("src/response.zig");
 const Request = @import("src/request.zig");
 
 pub fn main(init: std.process.Init) !void {
-    const stream = try Request.fetch(init.io, init.gpa, "https://portfolio.ethnatpf.com/fr");
+    const stream = try Request.fetch(init.io, init.gpa, "http://postman-echo.com/get");
     defer stream.close(init.io);
 
     // Read the response
@@ -15,6 +15,6 @@ pub fn main(init: std.process.Init) !void {
 
     const response = try Response.parse(reader, init.gpa);
 
-    //std.debug.print("Response: {s}", .{response});
+    std.debug.print("Response: {s}", .{response});
     defer init.gpa.free(response);
 }
