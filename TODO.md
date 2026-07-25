@@ -1,5 +1,5 @@
 - Write tests
-- Parse the response (instead of just printing it)
+- Add the ability to parse chunked responses (currently we assume that the content-length will be present)
 - Implement multiple methods
 - Handle DNS
 - Handle redirects

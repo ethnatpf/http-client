@@ -13,8 +13,9 @@ pub fn main(init: std.process.Init) !void {
     var stream_reader = stream.reader(init.io, &reader_buffer);
     const reader = &stream_reader.interface;
 
-    const response = try Response.parse(reader, init.gpa);
+    var response = try Response.parse(reader, init.gpa);
+    defer response.headers.deinit(init.gpa);
+    defer init.gpa.free(response.data);
 
-    std.debug.print("Response: {s}", .{response});
-    defer init.gpa.free(response);
+    std.debug.print("Response:\n Status code: {} Status message: {s}\n Data: {s}\n", .{ response.status_code, response.status_message, response.data });
 }
