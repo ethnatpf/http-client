@@ -6,4 +6,4 @@ This is not meant to be used in any production applications.
 Requires zig 0.16.0
 
 ## AI use
-AI is strictly used as a teacher, not to write code. See CLAUDE.md for details.
+AI is strictly used as a teacher, not to write code. See AGENTS.md for details.
